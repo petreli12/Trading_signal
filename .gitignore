@@ -1,0 +1,11 @@
+# Cursor IDE / agent files
+.cursor/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Local secrets & state (also covered by signal-bot/.gitignore)
+.env
+*.db

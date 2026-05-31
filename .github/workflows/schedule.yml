@@ -1,0 +1,75 @@
+name: signal-bot schedule
+
+on:
+  schedule:
+    # GitHub Actions cron is UTC. ET targets below assume EDT.
+    - cron: "0 12 * * 1-5"   # 08:00 ET pre-open
+    - cron: "0 21 * * 1-5"   # 17:00 ET post-close
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Run mode"
+        required: true
+        default: "postclose"
+        type: choice
+        options:
+          - preopen
+          - postclose
+      force:
+        description: "Run even if today is not an NYSE trading day (testing)"
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        working-directory: signal-bot
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Determine mode
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "mode=${{ github.event.inputs.mode }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "0 12 * * 1-5" ]; then
+            echo "mode=preopen" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=postclose" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run bot
+        working-directory: signal-bot
+        env:
+          X_PROVIDER_API_KEY: ${{ secrets.X_PROVIDER_API_KEY }}
+          X_LIST_ID: ${{ secrets.X_LIST_ID }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          IMAP_HOST: ${{ secrets.IMAP_HOST }}
+          IMAP_USER: ${{ secrets.IMAP_USER }}
+          IMAP_PASSWORD: ${{ secrets.IMAP_PASSWORD }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          # Optional failure-alert overrides (fall back to defaults / EMAIL_TO).
+          ALERT_ON_FAILURE: ${{ secrets.ALERT_ON_FAILURE }}
+          ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
+        run: |
+          ARGS="--mode ${{ steps.mode.outputs.mode }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.force }}" = "true" ]; then
+            ARGS="$ARGS --force"
+          fi
+          echo "Running: python main.py $ARGS"
+          python main.py $ARGS

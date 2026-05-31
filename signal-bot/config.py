@@ -1,0 +1,57 @@
+"""Central configuration: watchlist, source weights, schedule, prompt knobs.
+
+Secrets are NOT stored here — they are read from the environment / .env at
+point of use (see each module). This file holds only non-secret tuning knobs.
+"""
+
+import os
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# --- Watchlist -----------------------------------------------------------
+# Optional explicit universe of tickers to track. Empty means "track whatever
+# is mentioned" and let aggregation rank by mention volume.
+WATCHLIST: list[str] = []
+
+# --- Source weighting ----------------------------------------------------
+# Buckets keep X (narrative) and PDF (recap) signal separate. Per-source
+# weights feed the weighted_score in process/aggregate.py.
+SOURCE_WEIGHTS: dict[str, float] = {
+    "x": 1.0,     # X List narrative
+    "pdf": 1.5,   # EOD recap PDF (higher-credibility source)
+}
+
+# --- Schedule ------------------------------------------------------------
+# GitHub Actions cron is UTC. ET targets documented for reference only.
+RUN_MODES = ("preopen", "postclose")
+SCHEDULE_UTC = {
+    "preopen": "12:00",    # 08:00 ET (EDT)
+    "postclose": "21:00",  # 17:00 ET (EDT)
+}
+
+# --- Prompt knobs --------------------------------------------------------
+# Tuning for the LLM summary step. The model name itself is read from the
+# LLM_MODEL env var at call time — never hardcode it here.
+PROMPT = {
+    "max_tickers": 15,
+    "pump_risk_flag": True,   # flag mention-spike-without-credible-source
+    "temperature": 0.2,
+}
+
+# --- Identifiers ---------------------------------------------------------
+X_LIST_ID = os.environ.get("X_LIST_ID", "")
+
+# --- Failure alerting ----------------------------------------------------
+# On an unhandled run failure, email an alert (GitHub Actions red is the
+# backstop; this is the active notice). Recipient falls back to EMAIL_TO.
+# Default ON: only an explicit falsy value disables it. (An unset GitHub
+# Actions secret resolves to "", which must NOT silently disable alerting.)
+ALERT_ON_FAILURE = os.environ.get("ALERT_ON_FAILURE", "").strip().lower() not in {
+    "0",
+    "false",
+    "no",
+    "off",
+}
+ALERT_EMAIL_TO = os.environ.get("ALERT_EMAIL_TO") or os.environ.get("EMAIL_TO", "")
