@@ -215,6 +215,29 @@ def sms_digest(mode: str, table: list[dict[str, Any]], max_movers: int = 3) -> s
     return "\n".join(lines)
 
 
+# Plain-language column glossary, appended to every brief that has a table so a
+# casual reader can decode it. Deterministic (not LLM-written) so it's always
+# present and always matches the standardized column set requested in the prompt.
+_LEGEND = (
+    "\n\n---\n\n## How to read this brief\n"
+    "- **Ticker** — the stock symbol (e.g. NVDA = Nvidia).\n"
+    "- **Mentions** — how many posts in this run talked about it. More = more attention.\n"
+    "- **Δ (change)** — change in mentions vs. the previous run. A big jump is the real "
+    "signal (sudden buzz), not a name that's always loud.\n"
+    "- **Net sentiment** — overall bullish/bearish lean, from −1.0 (very bearish) to "
+    "+1.0 (very bullish); 0 is neutral.\n"
+    "- **Dispersion** — how much the crowd disagrees: near 0 = everyone agrees, near 1 = "
+    "sharply split (a divided, riskier read).\n"
+    "- **Confidence** — how trustworthy the read is; clear, repeated mentions score higher.\n"
+    "- **Notes / Signal** — plain-English takeaway for that ticker.\n"
+    "- **pump_risk** — a mention spike with no EOD-recap backing: treat as possible hype, "
+    "not a confirmed move.\n"
+    "- **X vs. recap** — *X* is trader chatter from the X List (attention/narrative); "
+    "*recap* is the end-of-day recap PDF (a credible, curated source). They're kept "
+    "separate on purpose — never blend them.\n"
+)
+
+
 def _render_unknown_cashtags(counts: dict[str, int] | None) -> str:
     """Markdown section naming frequently-mentioned non-whitelisted cashtags.
 
@@ -289,10 +312,14 @@ def summarize(
         "notes).\n\n"
         "Write the brief in Markdown. Structure it as:\n"
         "1. A one-line headline takeaway.\n"
-        "2. 'Top movers' — ranked tickers with mentions, day-over-day delta, "
-        "net sentiment + dispersion, and the X-vs-recap split.\n"
+        "2. 'Top movers' — render as a Markdown table with EXACTLY these columns "
+        "in this order: Ticker | Mentions | Δ | Net sentiment | Dispersion | "
+        "Confidence | Notes. One row per ticker; put the X-vs-recap split and any "
+        "caveats in Notes.\n"
         "3. 'Watch / risk' — any pump_risk flags and sharply divided "
-        "(high-dispersion) names.\n\n"
+        "(high-dispersion) names.\n"
+        "Do NOT add your own glossary or column key — one is appended "
+        "automatically after your brief.\n\n"
         "Data (ranked, JSON):\n"
         f"{json.dumps(prepared, ensure_ascii=False)}"
     )
@@ -307,6 +334,6 @@ def summarize(
     brief = "".join(
         block.text for block in message.content if getattr(block, "type", "") == "text"
     ).strip()
-    # Prepend the recap note and append unknowns deterministically (not via the
-    # LLM) so neither can be dropped or reworded.
-    return recap_note + brief + unknown_section
+    # Prepend the recap note and append the unknowns + column legend
+    # deterministically (not via the LLM) so none can be dropped or reworded.
+    return recap_note + brief + unknown_section + _LEGEND
