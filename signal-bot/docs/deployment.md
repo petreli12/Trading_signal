@@ -46,6 +46,23 @@ These have safe defaults; add them only to override behavior:
 > An unset `ALERT_ON_FAILURE` secret is treated as enabled — alerting only turns
 > off when the value is explicitly `false`/`0`/`no`/`off`.
 
+### Optional (SMS digest)
+
+A short text (headline + top 3 movers + flags) sent via the carrier
+**email-to-SMS gateway** alongside the full email brief. Free (reuses the SMTP
+credentials), but carrier-dependent — some carriers are phasing these gateways
+out, so treat email as the source of truth and SMS as a nice-to-have. Leave all
+three unset to disable SMS.
+
+| Secret name | Purpose |
+|---|---|
+| `SMS_PHONE` | 10-digit US number, digits only (e.g. `5551234567`) |
+| `SMS_CARRIER` | One of: `verizon`, `att`, `tmobile`, `googlefi`, `uscellular`, `cricket`, `boost`, `metropcs`, `virgin`, `xfinity` |
+| `SMS_TO` | OR a full gateway address (e.g. `5551234567@vtext.com`); overrides the two above |
+
+> SMS is **best-effort**: if the gateway send fails, the run logs a warning and
+> still succeeds (the email already went out). It never triggers a failure alert.
+
 ## 2. How to add each secret
 
 1. Go to your repository on GitHub.
@@ -72,7 +89,8 @@ variables are:
 X_PROVIDER_API_KEY, X_LIST_ID, ANTHROPIC_API_KEY, LLM_MODEL,
 IMAP_HOST, IMAP_USER, IMAP_PASSWORD,
 SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, EMAIL_TO,
-ALERT_ON_FAILURE, ALERT_EMAIL_TO
+ALERT_ON_FAILURE, ALERT_EMAIL_TO,
+SMS_PHONE, SMS_CARRIER, SMS_TO
 ```
 
 If you add a new env var in code, add a matching line to that `env:` block.

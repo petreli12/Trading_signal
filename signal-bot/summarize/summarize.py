@@ -123,6 +123,49 @@ def _prepare(table: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return prepared[:max_tickers]
 
 
+def _dir(score: float) -> str:
+    """Compact direction tag for a net sentiment score."""
+    if score >= 0.5:
+        return "bull"
+    if score <= -0.5:
+        return "bear"
+    if score > 0:
+        return "lean+"
+    if score < 0:
+        return "lean-"
+    return "flat"
+
+
+def sms_digest(mode: str, table: list[dict[str, Any]], max_movers: int = 3) -> str:
+    """Build a short plaintext SMS summary: headline + top movers + flags.
+
+    Deterministic (no LLM). Derived from the same ranked table the email uses,
+    so the text and the full brief never disagree.
+    """
+    label = "Pre-open" if mode == "preopen" else "Post-close"
+    prepared = _prepare(table)
+    if not prepared:
+        return f"signal-bot {label}: no ticker signal today."
+
+    lines = [f"signal-bot {label} — top {min(max_movers, len(prepared))}:"]
+    flagged: list[str] = []
+    for entry in prepared[:max_movers]:
+        ticker = entry["ticker"]
+        parts: list[str] = []
+        if entry["x"]:
+            parts.append(f"X {_dir(entry['x']['net_sentiment'])} ({entry['x']['mentions']})")
+        if entry["pdf"]:
+            parts.append(f"recap {_dir(entry['pdf']['net_sentiment'])}")
+        lines.append(f"{ticker}: {', '.join(parts) or 'n/a'}")
+        if entry.get("pump_risk"):
+            flagged.append(f"{ticker} pump?")
+        if entry["pdf"] and entry["pdf"].get("stance_divergence"):
+            flagged.append(f"{ticker} diverg")
+    if flagged:
+        lines.append("flags: " + ", ".join(flagged))
+    return "\n".join(lines)
+
+
 def _render_unknown_cashtags(counts: dict[str, int] | None) -> str:
     """Markdown section naming frequently-mentioned non-whitelisted cashtags.
 

@@ -144,6 +144,14 @@ def _orchestrate(mode: str, run_date: date, run_id: int) -> None:
     subject = f"[signal-bot] {mode} brief — {run_date.isoformat()}"
     email_send.send(subject, brief)
 
+    # Optional SMS digest (best-effort; never fail the run if the gateway is down).
+    if email_send.sms_enabled():
+        try:
+            email_send.send_sms(summarize.sms_digest(mode, rows))
+            logger.info("SMS digest sent.")
+        except Exception as exc:
+            logger.warning("SMS digest failed (suppressed): %r", exc)
+
     notes = (
         f"{len(new_posts)} new posts, {len(rows)} ticker rows, pdf_date={pdf_date}"
         + (f"; warnings: {' | '.join(warnings)}" if warnings else "")
