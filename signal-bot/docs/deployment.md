@@ -1,9 +1,12 @@
 # Deployment — GitHub Actions Secrets
 
-The bot runs on the GitHub Actions cron in `.github/workflows/schedule.yml`
-(twice daily, weekdays). It reads **all** configuration from environment
-variables; in CI those come from **repository secrets**. Nothing is committed —
-`.env` is git-ignored and used only for local runs.
+The bot runs in GitHub Actions via `.github/workflows/schedule.yml`. It is
+triggered twice daily (weekdays) by an **external scheduler** (cron-job.org)
+that calls the workflow over the `workflow_dispatch` REST API — GitHub's own
+built-in `schedule:` cron was unreliable (firing hours late), so it was removed
+(see [§5](#5-scheduling-external-trigger)). The bot reads **all** configuration
+from environment variables; in CI those come from **repository secrets**.
+Nothing is committed — `.env` is git-ignored and used only for local runs.
 
 > **Workflow location:** the workflow lives at the **repository root**
 > (`.github/workflows/schedule.yml`), not under `signal-bot/` — GitHub Actions
@@ -46,22 +49,17 @@ These have safe defaults; add them only to override behavior:
 > An unset `ALERT_ON_FAILURE` secret is treated as enabled — alerting only turns
 > off when the value is explicitly `false`/`0`/`no`/`off`.
 
-### Optional (SMS digest)
+### SMS digest — DISABLED
 
-A short text (headline + top 3 movers + flags) sent via the carrier
-**email-to-SMS gateway** alongside the full email brief. Free (reuses the SMTP
-credentials), but carrier-dependent — some carriers are phasing these gateways
-out, so treat email as the source of truth and SMS as a nice-to-have. Leave all
-three unset to disable SMS.
+SMS via carrier **email-to-SMS gateways** is **disabled**. In practice
+Metro/T-Mobile (like AT&T) silently filters these gateways: SMTP accepts the
+message but the carrier never delivers it to the handset. The `SMS_*` env was
+removed from `schedule.yml`. The code path (`deliver/email_send.send_sms`) is
+left intact but inert (`sms_enabled()` is false with no config).
 
-| Secret name | Purpose |
-|---|---|
-| `SMS_PHONE` | 10-digit US number, digits only (e.g. `5551234567`) |
-| `SMS_CARRIER` | One of: `verizon`, `att`, `tmobile`, `googlefi`, `uscellular`, `cricket`, `boost`, `metropcs`, `virgin`, `xfinity` |
-| `SMS_TO` | OR a full gateway address (e.g. `5551234567@vtext.com`); overrides the two above |
-
-> SMS is **best-effort**: if the gateway send fails, the run logs a warning and
-> still succeeds (the email already went out). It never triggers a failure alert.
+To get a phone alert, use **email + Gmail push notifications** instead. To bring
+back real texts later, integrate a proper SMS provider (e.g. Twilio) rather than
+the free gateways, and re-add the relevant env to `schedule.yml`.
 
 ## 2. How to add each secret
 
@@ -89,8 +87,7 @@ variables are:
 X_PROVIDER_API_KEY, X_LIST_ID, ANTHROPIC_API_KEY, LLM_MODEL,
 IMAP_HOST, IMAP_USER, IMAP_PASSWORD,
 SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, EMAIL_TO,
-ALERT_ON_FAILURE, ALERT_EMAIL_TO,
-SMS_PHONE, SMS_CARRIER, SMS_TO
+ALERT_ON_FAILURE, ALERT_EMAIL_TO
 ```
 
 If you add a new env var in code, add a matching line to that `env:` block.
@@ -112,10 +109,64 @@ Do not wait for the scheduled run to discover a bad secret.
    Fix the offending secret and re-run the dispatch.
 5. Only once a manual dispatch succeeds end-to-end should you rely on the cron.
 
-### Scheduling reference
+## 5. Scheduling (external trigger)
 
-- Cron is **UTC**. The workflow targets EDT: `12:00` UTC pre-open, `21:00` UTC
-  post-close. During EST these land an hour earlier in ET; `main.py` no-ops on
-  non-trading days, so an off-by-an-hour on holidays is harmless.
-- GitHub may delay scheduled jobs under load; the twice-daily cadence tolerates
-  this.
+GitHub's built-in `schedule:` cron is **best-effort** and was firing hours late
+(top-of-the-hour congestion), so the time-critical pre-open brief missed the
+open. Scheduling is therefore driven by an **external scheduler** that calls the
+workflow on time via the `workflow_dispatch` REST API. Any punctual scheduler
+works; the setup below uses the free [cron-job.org](https://cron-job.org).
+
+### 5a. Create a GitHub token
+
+The scheduler needs a token to trigger the workflow. Use a **fine-grained PAT**
+scoped to this repo only:
+
+1. GitHub → **Settings → Developer settings → Personal access tokens →
+   Fine-grained tokens → Generate new token**.
+2. **Repository access:** Only select repositories → `petreli12/Trading_signal`.
+3. **Permissions → Repository permissions → Actions: Read and write**
+   (this is what `workflow_dispatch` requires). Leave everything else default.
+4. Generate and copy the token (starts with `github_pat_…`). Store it safely.
+
+### 5b. Create two cron-job.org jobs
+
+Sign up at cron-job.org, then create **two** jobs (pre-open and post-close).
+For **each** job:
+
+- **URL:**
+  `https://api.github.com/repos/petreli12/Trading_signal/actions/workflows/schedule.yml/dispatches`
+- **Request method:** `POST`
+- **Headers:**
+  - `Authorization: Bearer github_pat_…` (your token from 5a)
+  - `Accept: application/vnd.github+json`
+  - `Content-Type: application/json`
+  - `X-GitHub-Api-Version: 2022-11-28`
+  - `User-Agent: signal-bot-cron` (GitHub rejects requests with no User-Agent)
+- **Request body (pre-open job):**
+  ```json
+  {"ref":"main","inputs":{"mode":"preopen","force":"false"}}
+  ```
+  **Request body (post-close job):**
+  ```json
+  {"ref":"main","inputs":{"mode":"postclose","force":"false"}}
+  ```
+- **Schedule / timezone:** set the job timezone to **`America/New_York`**
+  (cron-job.org handles DST automatically — no UTC math), then:
+  - pre-open job:   **08:00**, Mon–Fri
+  - post-close job: **20:00**, Mon–Fri
+
+> A successful dispatch returns **HTTP 204** with an empty body. cron-job.org
+> will show the job as succeeding on a 204. If you get **401/403**, the token
+> lacks `Actions: write` or is for the wrong repo; **404** usually means a
+> mistyped repo/workflow path or a missing `User-Agent` header.
+
+### 5c. Notes
+
+- `force` is `"false"` for real runs so the **NYSE trading-day gate** in
+  `main.py` no-ops on weekends/holidays (no spurious brief). Use `"true"` only
+  for manual testing.
+- The token only grants permission to **trigger** this workflow; it cannot read
+  code or secrets. Rotate it if exposed.
+- You can still trigger runs manually any time from **Actions → "signal-bot
+  schedule" → Run workflow**, which is handy for ad-hoc tests.

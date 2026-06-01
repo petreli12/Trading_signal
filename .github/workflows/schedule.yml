@@ -1,12 +1,13 @@
 name: signal-bot schedule
 
 on:
-  schedule:
-    # GitHub Actions cron is UTC. ET targets below assume EDT.
-    - cron: "0 12 * * 1-5"   # 08:00 ET pre-open
-    # 20:00 ET post-close = 00:00 UTC the NEXT day, so this runs Tue–Sat UTC to
-    # cover Mon–Fri evenings ET (the bot no-ops via the NYSE gate on holidays).
-    - cron: "0 0 * * 2-6"    # 20:00 ET post-close (00:00 UTC next day)
+  # GitHub's built-in `schedule:` cron is best-effort and was firing hours late
+  # (top-of-hour congestion), so the pre-open brief missed the open. Scheduling
+  # is now driven by an external scheduler (cron-job.org) that calls this
+  # workflow via the workflow_dispatch REST API at the exact ET times:
+  #   - pre-open:   08:00 America/New_York, Mon–Fri  (inputs.mode=preopen)
+  #   - post-close: 20:00 America/New_York, Mon–Fri  (inputs.mode=postclose)
+  # The NYSE trading-day gate in main.py still no-ops on holidays.
   workflow_dispatch:
     inputs:
       mode:
@@ -42,13 +43,9 @@ jobs:
       - name: Determine mode
         id: mode
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "mode=${{ github.event.inputs.mode }}" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event.schedule }}" = "0 12 * * 1-5" ]; then
-            echo "mode=preopen" >> "$GITHUB_OUTPUT"
-          else
-            echo "mode=postclose" >> "$GITHUB_OUTPUT"
-          fi
+          # Triggered only via workflow_dispatch (external scheduler / manual).
+          MODE="${{ github.event.inputs.mode }}"
+          echo "mode=${MODE:-postclose}" >> "$GITHUB_OUTPUT"
 
       - name: Run bot
         working-directory: signal-bot
