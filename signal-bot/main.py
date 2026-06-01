@@ -126,7 +126,11 @@ def _orchestrate(mode: str, run_date: date, run_id: int) -> None:
     rows = aggregate.build(run_date.isoformat(), run_id=run_id, pdf_date=pdf_date)
     unknown_cashtags = _tally_unknown_cashtags(new_posts)
     brief = summarize.summarize(
-        mode, rows, unknown_cashtags=unknown_cashtags, recap_status=recap_status
+        mode,
+        rows,
+        unknown_cashtags=unknown_cashtags,
+        recap_status=recap_status,
+        posts=new_posts,
     )
     brief = _append_warnings(brief, warnings)
 

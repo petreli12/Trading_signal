@@ -17,10 +17,15 @@ ANTHROPIC_API_KEY — never hardcode a model string.
 
 import json
 import os
+from datetime import datetime
 from functools import lru_cache
 from typing import Any
 
 import config
+from process import extract
+
+# How many example posts to show under the most-mentioned ticker's evidence.
+X_EVIDENCE_EXAMPLES = 3
 
 PDF_BUCKET = "pdf"
 X_BUCKET = "x"
@@ -238,6 +243,68 @@ _LEGEND = (
 )
 
 
+def _fmt_engagement(n: int) -> str:
+    """Compact engagement count (e.g. 1234 -> '1.2k')."""
+    return f"{n / 1000:.1f}k" if n >= 1000 else str(n)
+
+
+def _fmt_ts(ts: str) -> str:
+    """Format an ISO-UTC timestamp as 'YYYY-MM-DD HH:MM UTC'; pass through on error."""
+    try:
+        return datetime.fromisoformat(ts).strftime("%Y-%m-%d %H:%M UTC")
+    except (ValueError, TypeError):
+        return ts or "?"
+
+
+def _render_x_evidence(
+    ticker: str | None,
+    posts: list[dict[str, Any]] | None,
+    max_examples: int = X_EVIDENCE_EXAMPLES,
+) -> str:
+    """Show who posted about the most-mentioned ticker, with real example posts.
+
+    Deterministic (built from the run's actual posts, not the LLM): per-author
+    mention counts plus a few highest-engagement example posts with author and
+    timestamp. Returns '' if there is nothing to show.
+    """
+    if not ticker or not posts:
+        return ""
+    mentions = [
+        p for p in posts if ticker in extract.tickers(p.get("text", "") or "")
+    ]
+    if not mentions:
+        return ""
+
+    counts: dict[str, int] = {}
+    for p in mentions:
+        author = (p.get("author") or "?").lstrip("@")
+        counts[author] = counts.get(author, 0) + 1
+    who = ", ".join(
+        f"@{a} ×{n}" for a, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    )
+
+    examples = sorted(
+        mentions,
+        key=lambda p: (int(p.get("engagement") or 0), p.get("ts", "")),
+        reverse=True,
+    )[:max_examples]
+
+    lines = [
+        f"\n\n---\n\n## What X is saying about ${ticker} (most-mentioned)\n",
+        f"**Who's posting this run:** {who}\n",
+        "\n**Sample posts:**\n",
+    ]
+    for p in examples:
+        author = (p.get("author") or "?").lstrip("@")
+        ts = _fmt_ts(p.get("ts", ""))
+        eng = _fmt_engagement(int(p.get("engagement") or 0))
+        excerpt = " ".join((p.get("text", "") or "").split())
+        if len(excerpt) > 240:
+            excerpt = excerpt[:237].rstrip() + "…"
+        lines.append(f"- **@{author}** · {ts} · {eng} eng — \"{excerpt}\"\n")
+    return "".join(lines)
+
+
 def _render_unknown_cashtags(counts: dict[str, int] | None) -> str:
     """Markdown section naming frequently-mentioned non-whitelisted cashtags.
 
@@ -265,6 +332,7 @@ def summarize(
     table: list[dict[str, Any]],
     unknown_cashtags: dict[str, int] | None = None,
     recap_status: str = "present",
+    posts: list[dict[str, Any]] | None = None,
 ) -> str:
     """Generate the brief from the aggregated table.
 
@@ -279,6 +347,9 @@ def summarize(
             'not_expected' — non-trading day; absence is normal (calm note).
             'pending'      — trading day, recap not posted yet (informational).
             'missing'      — trading day, recap genuinely absent (prominent warning).
+        posts: Optional list of the run's normalized X posts. When given, an
+            evidence section (per-author counts + real example posts) for the
+            most-mentioned ticker is appended deterministically.
 
     Returns:
         The formatted brief text (Markdown).
@@ -319,7 +390,8 @@ def summarize(
         "3. 'Watch / risk' — any pump_risk flags and sharply divided "
         "(high-dispersion) names.\n"
         "Do NOT add your own glossary or column key — one is appended "
-        "automatically after your brief.\n\n"
+        "automatically after your brief. Do NOT quote or invent individual "
+        "posts/usernames — real example posts are appended automatically.\n\n"
         "Data (ranked, JSON):\n"
         f"{json.dumps(prepared, ensure_ascii=False)}"
     )
@@ -334,6 +406,15 @@ def summarize(
     brief = "".join(
         block.text for block in message.content if getattr(block, "type", "") == "text"
     ).strip()
-    # Prepend the recap note and append the unknowns + column legend
+
+    # Most-mentioned X ticker (by X mention count, not rank) for the evidence section.
+    top_x = max(
+        (e for e in prepared if e.get("x")),
+        key=lambda e: e["x"]["mentions"],
+        default=None,
+    )
+    evidence = _render_x_evidence(top_x["ticker"] if top_x else None, posts)
+
+    # Prepend the recap note and append the X evidence + unknowns + column legend
     # deterministically (not via the LLM) so none can be dropped or reworded.
-    return recap_note + brief + unknown_section + _LEGEND
+    return recap_note + brief + evidence + unknown_section + _LEGEND
