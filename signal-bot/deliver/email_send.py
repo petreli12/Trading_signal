@@ -43,7 +43,8 @@ def _config() -> tuple[str, int, str, str, list[str]]:
     host = os.environ.get("SMTP_HOST")
     user = os.environ.get("SMTP_USER")
     password = os.environ.get("SMTP_PASSWORD")
-    port = int(os.environ.get("SMTP_PORT", DEFAULT_SMTP_PORT))
+    # An unset GitHub Actions secret resolves to "", so fall back explicitly.
+    port = int(os.environ.get("SMTP_PORT") or DEFAULT_SMTP_PORT)
     recipients = [r.strip() for r in os.environ.get("EMAIL_TO", "").split(",") if r.strip()]
 
     missing = [
