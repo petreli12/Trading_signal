@@ -40,9 +40,10 @@ class PdfDoc(TypedDict):
 
 
 def _config() -> tuple[str, str, str]:
-    host = os.environ.get("IMAP_HOST")
-    user = os.environ.get("IMAP_USER")
-    password = os.environ.get("IMAP_PASSWORD")
+    # .strip() guards against trailing newlines pasted into CI secrets.
+    host = (os.environ.get("IMAP_HOST") or "").strip()
+    user = (os.environ.get("IMAP_USER") or "").strip()
+    password = (os.environ.get("IMAP_PASSWORD") or "").strip()
     missing = [
         name
         for name, val in (

@@ -40,11 +40,13 @@ _HTML_TEMPLATE = """\
 
 
 def _config() -> tuple[str, int, str, str, list[str]]:
-    host = os.environ.get("SMTP_HOST")
-    user = os.environ.get("SMTP_USER")
-    password = os.environ.get("SMTP_PASSWORD")
+    # .strip() guards against trailing newlines pasted into CI secrets, which
+    # would otherwise produce invalid email headers or failed logins.
+    host = (os.environ.get("SMTP_HOST") or "").strip()
+    user = (os.environ.get("SMTP_USER") or "").strip()
+    password = (os.environ.get("SMTP_PASSWORD") or "").strip()
     # An unset GitHub Actions secret resolves to "", so fall back explicitly.
-    port = int(os.environ.get("SMTP_PORT") or DEFAULT_SMTP_PORT)
+    port = int((os.environ.get("SMTP_PORT") or "").strip() or DEFAULT_SMTP_PORT)
     recipients = [r.strip() for r in os.environ.get("EMAIL_TO", "").split(",") if r.strip()]
 
     missing = [

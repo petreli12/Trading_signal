@@ -41,7 +41,7 @@ PROMPT = {
 }
 
 # --- Identifiers ---------------------------------------------------------
-X_LIST_ID = os.environ.get("X_LIST_ID", "")
+X_LIST_ID = os.environ.get("X_LIST_ID", "").strip()
 
 # --- Failure alerting ----------------------------------------------------
 # On an unhandled run failure, email an alert (GitHub Actions red is the
@@ -54,4 +54,6 @@ ALERT_ON_FAILURE = os.environ.get("ALERT_ON_FAILURE", "").strip().lower() not in
     "no",
     "off",
 }
-ALERT_EMAIL_TO = os.environ.get("ALERT_EMAIL_TO") or os.environ.get("EMAIL_TO", "")
+ALERT_EMAIL_TO = (
+    os.environ.get("ALERT_EMAIL_TO") or os.environ.get("EMAIL_TO", "")
+).strip()

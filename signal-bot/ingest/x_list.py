@@ -46,7 +46,7 @@ class NormalizedPost(TypedDict):
 
 
 def _api_key() -> str:
-    key = os.environ.get("X_PROVIDER_API_KEY")
+    key = (os.environ.get("X_PROVIDER_API_KEY") or "").strip()
     if not key:
         raise RuntimeError(
             "X_PROVIDER_API_KEY is not set. Add it to your .env / environment."

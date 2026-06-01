@@ -61,7 +61,7 @@ _SYSTEM_PROMPT = (
 
 
 def _model() -> str:
-    model = os.environ.get("LLM_MODEL")
+    model = (os.environ.get("LLM_MODEL") or "").strip()
     if not model:
         raise RuntimeError("LLM_MODEL is not set. Add it to your .env / environment.")
     return model
@@ -69,7 +69,7 @@ def _model() -> str:
 
 @lru_cache(maxsize=1)
 def _client():
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    api_key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
     if not api_key:
         raise RuntimeError(
             "ANTHROPIC_API_KEY is not set. Add it to your .env / environment."
