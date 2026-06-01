@@ -14,7 +14,7 @@ It is decision-support: the brief flags, you decide.
 INGEST                         PROCESS                          DELIVER
 ──────────────                 ───────────────────              ───────────────
 X List (twitterapi.io) ─┐
-                        │      ticker extraction ($CASHTAG + alias NER)
+                        │      ticker extraction ($CASHTAG, whitelist-checked)
 EOD recap PDF ──────────┼───►  per-ticker sentiment (Anthropic, batched)
 (email / IMAP)          │      aggregate + rank + day-over-day delta
                         │      source weighting + dispersion
@@ -37,7 +37,7 @@ signal-bot/
 │   ├── x_list.py             # X List via twitterapi.io adapter -> normalized posts
 │   └── pdf_email.py          # IMAP -> latest PDF attachment -> text (pymupdf)
 ├── process/
-│   ├── extract.py            # $CASHTAG regex + alias NER -> symbols
+│   ├── extract.py            # $CASHTAG regex, US-ticker whitelist -> symbols
 │   ├── sentiment.py          # per-(ticker, bucket) sentiment via Anthropic (batched)
 │   └── aggregate.py          # rank, day-over-day delta, weighting, dispersion
 ├── summarize/summarize.py    # LLM summary; pre-open vs post-close variants
@@ -61,12 +61,6 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env   # then fill in the values
-```
-
-Optional (improves company-name extraction; the bot runs fine without it):
-
-```bash
-python -m spacy download en_core_web_sm
 ```
 
 ### Configuration

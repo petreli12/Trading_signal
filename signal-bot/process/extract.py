@@ -1,18 +1,30 @@
-"""Ticker extraction: $CASHTAG regex + lightweight NER -> resolved symbols.
+"""Ticker extraction for the X bucket: $CASHTAG only, whitelist-validated.
 
-Two complementary passes:
-  1. ``$CASHTAG`` regex — high-precision, explicit ticker mentions ($NVDA).
-  2. Company-name resolution — map known company/index names ("Nvidia",
-     "the Nasdaq") to symbols via an alias table.
+Design (X path):
+  1. ``$CASHTAG`` regex — explicit, high-precision ticker mentions ($NVDA).
+     Traders cashtag their tickers, so this is the reliable signal on X.
+  2. Whitelist — the cashtag's symbol must be a real US listing (NYSE/Nasdaq).
+     Valid-length fakes like ``$ZZZZ`` are dropped; drops are logged so a real
+     ticker missing from the list can be spotted and the list refreshed.
 
-spaCy NER is used as an optional refinement when installed: it restricts
-name-based matches to spans tagged as organizations, cutting false positives.
-If spaCy or its model is unavailable, the alias pass still runs on raw text, so
-extraction works offline with no model download.
+We deliberately do NOT resolve bare company names ("Apple", "Nvidia") on the X
+path: that path caused false positives like "I love my Apple watch" -> AAPL, and
+the spaCy ORG-filter meant to gate it was never installed in prod/CI. The recall
+lost is small (cashtags dominate trader posts) relative to the noise removed.
+
+NOTE: the PDF/recap bucket does NOT use this module — it is parsed
+deterministically in process/aggregate.py. This is the X path only.
+
+The whitelist lives in ``process/us_tickers.txt`` (regenerate with
+``scripts/refresh_symbols.py``; monthly cadence is plenty).
 """
 
+import logging
 import re
 from functools import lru_cache
+from pathlib import Path
+
+logger = logging.getLogger("signal_bot.extract")
 
 # Cashtags: 1-5 letters with an optional class suffix (e.g. $BRK.B), no digits.
 _CASHTAG_RE = re.compile(r"\$([A-Za-z]{1,5})(?:\.([A-Za-z]))?\b")
@@ -20,91 +32,32 @@ _CASHTAG_RE = re.compile(r"\$([A-Za-z]{1,5})(?:\.([A-Za-z]))?\b")
 # Common cashtag false positives (short English words people prefix with $).
 _CASHTAG_STOPWORDS = {"A", "I", "ALL", "FOR", "ON", "IT", "BE", "OR", "SO"}
 
-# Company/index alias table -> canonical symbol. name->ticker needs a curated
-# lookup, so this is explicit. Keys are matched case-insensitively on word
-# boundaries. NOTE: without spaCy installed, these match on raw text, so a
-# generic word ("apple") can false-positive on non-stock uses ("Apple watch").
-# Cashtags ($AAPL) remain the high-precision signal; aliases add recall.
-COMPANY_ALIASES: dict[str, str] = {
-    # Mega-cap tech
-    "apple": "AAPL",
-    "microsoft": "MSFT",
-    "nvidia": "NVDA",
-    "amazon": "AMZN",
-    "alphabet": "GOOGL",
-    "google": "GOOGL",
-    "meta": "META",
-    "facebook": "META",
-    "tesla": "TSLA",
-    "broadcom": "AVGO",
-    "netflix": "NFLX",
-    # Semis & hardware
-    "arm": "ARM",
-    "ibm": "IBM",
-    "amd": "AMD",
-    "intel": "INTC",
-    "micron": "MU",
-    "qualcomm": "QCOM",
-    "marvell": "MRVL",
-    "supermicro": "SMCI",
-    "super micro": "SMCI",
-    "taiwan semi": "TSM",
-    "tsmc": "TSM",
-    "asml": "ASML",
-    # Software / cloud / security
-    "palantir": "PLTR",
-    "oracle": "ORCL",
-    "salesforce": "CRM",
-    "adobe": "ADBE",
-    "servicenow": "NOW",
-    "snowflake": "SNOW",
-    "crowdstrike": "CRWD",
-    "cloudflare": "NET",
-    "datadog": "DDOG",
-    "palo alto": "PANW",
-    "shopify": "SHOP",
-    # Consumer / internet / fintech
-    "uber": "UBER",
-    "airbnb": "ABNB",
-    "coinbase": "COIN",
-    "robinhood": "HOOD",
-    "paypal": "PYPL",
-    "microstrategy": "MSTR",
-    "strategy inc": "MSTR",
-    "alibaba": "BABA",
-    "disney": "DIS",
-    "walmart": "WMT",
-    "costco": "COST",
-    # Autos & industrials
-    "boeing": "BA",
-    # Financials
-    "jpmorgan": "JPM",
-    "jp morgan": "JPM",
-    "goldman sachs": "GS",
-    "bank of america": "BAC",
-    # Healthcare / energy
-    "eli lilly": "LLY",
-    "exxon": "XOM",
-    "chevron": "CVX",
-    # Indices / ETFs
-    "the nasdaq": "QQQ",
-    "nasdaq": "QQQ",
-    "the s&p": "SPY",
-    "s&p 500": "SPY",
-    "sp500": "SPY",
-    "russell 2000": "IWM",
-    "the dow": "DIA",
-}
+_WHITELIST_PATH = Path(__file__).resolve().parent / "us_tickers.txt"
 
-# Precompiled, longest-alias-first so multi-word names win over substrings.
-_ALIAS_PATTERNS = [
-    (re.compile(rf"(?<![\w$]){re.escape(alias)}(?![\w])", re.IGNORECASE), symbol)
-    for alias, symbol in sorted(COMPANY_ALIASES.items(), key=lambda kv: -len(kv[0]))
-]
+
+@lru_cache(maxsize=1)
+def _whitelist() -> frozenset[str]:
+    """Load the real-US-ticker whitelist (uppercase symbols, one per line)."""
+    try:
+        text = _WHITELIST_PATH.read_text(encoding="utf-8")
+    except OSError:
+        logger.error("Ticker whitelist missing at %s; extraction will drop all "
+                     "cashtags. Run scripts/refresh_symbols.py.", _WHITELIST_PATH)
+        return frozenset()
+    return frozenset(line.strip().upper() for line in text.splitlines() if line.strip())
+
+
+def _is_listed(symbol: str) -> bool:
+    """True if ``symbol`` (or its base, ignoring a class suffix) is listed."""
+    whitelist = _whitelist()
+    return symbol in whitelist or symbol.split(".", 1)[0] in whitelist
 
 
 def extract_cashtags(text: str) -> list[str]:
-    """Return uppercase ticker symbols from ``$CASHTAG`` mentions, in order."""
+    """Return uppercase ticker symbols from ``$CASHTAG`` mentions, in order.
+
+    Raw (pre-whitelist): only the regex + short-word stopwords are applied.
+    """
     out: list[str] = []
     for base, suffix in _CASHTAG_RE.findall(text or ""):
         symbol = base.upper()
@@ -116,62 +69,23 @@ def extract_cashtags(text: str) -> list[str]:
     return out
 
 
-@lru_cache(maxsize=1)
-def _nlp():
-    """Lazily load spaCy's small English model, or return ``None`` if absent."""
-    try:
-        import spacy
-
-        return spacy.load("en_core_web_sm")
-    except Exception:
-        return None
-
-
-def extract_named(text: str) -> list[str]:
-    """Resolve known company/index names to symbols via the alias table.
-
-    When spaCy is available, only matches that fall inside an ORG entity span
-    are kept (fewer false positives); otherwise the alias patterns run on the
-    full text.
-    """
-    if not text:
-        return []
-
-    org_spans: list[tuple[int, int]] | None = None
-    nlp = _nlp()
-    if nlp is not None:
-        doc = nlp(text)
-        org_spans = [
-            (ent.start_char, ent.end_char)
-            for ent in doc.ents
-            if ent.label_ in {"ORG", "PRODUCT"}
-        ]
-
-    hits: list[tuple[int, str]] = []
-    for pattern, symbol in _ALIAS_PATTERNS:
-        for match in pattern.finditer(text):
-            if org_spans is not None and not _within_any(match.span(), org_spans):
-                continue
-            hits.append((match.start(), symbol))
-    return [symbol for _, symbol in sorted(hits, key=lambda h: h[0])]
-
-
-def _within_any(span: tuple[int, int], spans: list[tuple[int, int]]) -> bool:
-    start, end = span
-    return any(s <= start and end <= e for s, e in spans)
-
-
 def tickers(text: str) -> list[str]:
-    """Extract resolved ticker symbols from text (cashtags + named entities).
+    """Extract de-duplicated, whitelist-validated ticker symbols from text.
 
-    Args:
-        text: Raw post or document text.
+    Only ``$CASHTAG`` mentions are considered (X path). A cashtag whose symbol
+    is not a real US listing is dropped and logged, so the brief never scores a
+    junk ticker but a genuinely-missing symbol stays visible in the logs.
 
     Returns:
-        A de-duplicated list of uppercase ticker symbols, preserving the order
-        of first appearance.
+        Uppercase symbols, de-duplicated, in order of first appearance.
     """
     seen: dict[str, None] = {}
-    for symbol in extract_cashtags(text) + extract_named(text):
-        seen.setdefault(symbol, None)
+    dropped: set[str] = set()
+    for symbol in extract_cashtags(text):
+        if _is_listed(symbol):
+            seen.setdefault(symbol, None)
+        else:
+            dropped.add(symbol)
+    if dropped:
+        logger.info("Dropped non-whitelisted cashtag(s): %s", ", ".join(sorted(dropped)))
     return list(seen)
