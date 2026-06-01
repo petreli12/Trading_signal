@@ -69,6 +69,18 @@ def extract_cashtags(text: str) -> list[str]:
     return out
 
 
+def _classify(text: str) -> tuple[list[str], list[str]]:
+    """Split a text's cashtags into (whitelisted, dropped) — both de-duped."""
+    kept: dict[str, None] = {}
+    dropped: dict[str, None] = {}
+    for symbol in extract_cashtags(text):
+        if _is_listed(symbol):
+            kept.setdefault(symbol, None)
+        else:
+            dropped.setdefault(symbol, None)
+    return list(kept), list(dropped)
+
+
 def tickers(text: str) -> list[str]:
     """Extract de-duplicated, whitelist-validated ticker symbols from text.
 
@@ -79,13 +91,16 @@ def tickers(text: str) -> list[str]:
     Returns:
         Uppercase symbols, de-duplicated, in order of first appearance.
     """
-    seen: dict[str, None] = {}
-    dropped: set[str] = set()
-    for symbol in extract_cashtags(text):
-        if _is_listed(symbol):
-            seen.setdefault(symbol, None)
-        else:
-            dropped.add(symbol)
+    kept, dropped = _classify(text)
     if dropped:
         logger.info("Dropped non-whitelisted cashtag(s): %s", ", ".join(sorted(dropped)))
-    return list(seen)
+    return kept
+
+
+def unknown_cashtags(text: str) -> list[str]:
+    """Regex-valid cashtags that are NOT on the whitelist (de-duped, in order).
+
+    Used to surface frequently-mentioned unknowns (possible new/missing
+    tickers) in the brief. These are never scored, ranked, or weighted.
+    """
+    return _classify(text)[1]

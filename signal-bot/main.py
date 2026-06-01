@@ -18,7 +18,7 @@ import pandas_market_calendars as mcal
 import config
 from deliver import email_send
 from ingest import pdf_email, x_list
-from process import aggregate
+from process import aggregate, extract
 from store import db
 from summarize import summarize
 
@@ -123,16 +123,20 @@ def _orchestrate(mode: str, run_date: date, run_id: int) -> None:
         warnings.append(f"Recap not yet available ({reason}) — brief is X-only.")
 
     rows = aggregate.build(run_date.isoformat(), run_id=run_id, pdf_date=pdf_date)
-    brief = summarize.summarize(mode, rows)
+    unknown_cashtags = _tally_unknown_cashtags(new_posts)
+    brief = summarize.summarize(mode, rows, unknown_cashtags=unknown_cashtags)
     brief = _append_warnings(brief, warnings)
 
     status = "partial" if warnings else "ok"
 
-    # A healthy run that ingested nothing from either bucket is still a red
-    # flag (e.g. provider returned empty on depleted credits). Make it loud.
-    if status == "ok" and not new_posts and not pdf_present:
+    # A run that ingested nothing usable from either bucket is a red flag
+    # (e.g. provider returned empty on depleted credits). Keyed off ACTUAL
+    # emptiness (no X posts AND no usable recap rows), NOT status — a missing
+    # PDF flips status to "partial" and must not hide this banner.
+    pdf_rows_present = any(r["bucket"] == aggregate.PDF_BUCKET for r in rows)
+    if not new_posts and not pdf_rows_present:
         logger.warning(
-            "No data ingested this run (0 posts, no matching PDF) — "
+            "No data ingested this run (0 posts, no usable recap rows) — "
             "check provider credits and credentials."
         )
         brief = _DATA_BANNER + brief
@@ -146,6 +150,20 @@ def _orchestrate(mode: str, run_date: date, run_id: int) -> None:
     )
     db.finish_run(run_id, status, notes)
     logger.info("%s run complete (%s) — %s", mode, status, notes)
+
+
+def _tally_unknown_cashtags(posts: list) -> dict[str, int]:
+    """Count regex-valid but non-whitelisted cashtags across the run's posts.
+
+    One mention per post (deduped within a post), mirroring X mention counts.
+    These are informational only — never scored, ranked, or weighted.
+    """
+    counts: dict[str, int] = {}
+    for post in posts:
+        text = post.get("text", "") or ""
+        for sym in set(extract.unknown_cashtags(text)):
+            counts[sym] = counts.get(sym, 0) + 1
+    return counts
 
 
 def _append_warnings(brief: str, warnings: list[str]) -> str:

@@ -27,6 +27,9 @@ X_BUCKET = "x"
 MAX_OUTPUT_TOKENS = 1500
 # An X mention jump this large with no PDF-recap corroboration is a pump flag.
 PUMP_MIN_DELTA = 5
+# Surface an unrecognized cashtag only once it's mentioned this many times in a
+# run (below this is likely a typo, not a missing ticker).
+UNKNOWN_CASHTAG_MIN = 3
 
 _MODE_GUIDANCE = {
     "preopen": (
@@ -120,12 +123,41 @@ def _prepare(table: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return prepared[:max_tickers]
 
 
-def summarize(mode: str, table: list[dict[str, Any]]) -> str:
+def _render_unknown_cashtags(counts: dict[str, int] | None) -> str:
+    """Markdown section naming frequently-mentioned non-whitelisted cashtags.
+
+    Only cashtags at/above ``UNKNOWN_CASHTAG_MIN`` mentions are listed; these
+    are informational (possible new/missing tickers), never scored or ranked.
+    """
+    if not counts:
+        return ""
+    frequent = sorted(
+        ((sym, n) for sym, n in counts.items() if n >= UNKNOWN_CASHTAG_MIN),
+        key=lambda kv: (-kv[1], kv[0]),
+    )
+    if not frequent:
+        return ""
+    listed = ", ".join(f"${sym} x{n}" for sym, n in frequent)
+    return (
+        "\n\n---\n\n## Unrecognized cashtags (possible new/missing tickers)\n"
+        f"{listed}\n\n"
+        "*Not scored or ranked — review and add to the whitelist if real.*"
+    )
+
+
+def summarize(
+    mode: str,
+    table: list[dict[str, Any]],
+    unknown_cashtags: dict[str, int] | None = None,
+) -> str:
     """Generate the brief from the aggregated table.
 
     Args:
         mode: 'preopen' or 'postclose'.
         table: The ranked aggregate rows from ``process.aggregate.build``.
+        unknown_cashtags: Optional {symbol: run mention count} of regex-valid
+            but non-whitelisted cashtags. Frequent ones are surfaced in a
+            trailing informational section (never scored).
 
     Returns:
         The formatted brief text (Markdown).
@@ -133,9 +165,14 @@ def summarize(mode: str, table: list[dict[str, Any]]) -> str:
     if mode not in _MODE_GUIDANCE:
         raise ValueError(f"Unknown mode {mode!r}; expected 'preopen' or 'postclose'.")
 
+    unknown_section = _render_unknown_cashtags(unknown_cashtags)
+
     prepared = _prepare(table)
     if not prepared:
-        return f"# {mode.title()} Brief\n\nNo meaningful ticker signal in this run."
+        return (
+            f"# {mode.title()} Brief\n\nNo meaningful ticker signal in this run."
+            + unknown_section
+        )
 
     user_message = (
         f"{_MODE_GUIDANCE[mode]}\n\n"
@@ -164,6 +201,8 @@ def summarize(mode: str, table: list[dict[str, Any]]) -> str:
         system=_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_message}],
     )
-    return "".join(
+    brief = "".join(
         block.text for block in message.content if getattr(block, "type", "") == "text"
     ).strip()
+    # Append deterministically (not via the LLM) so it can't be dropped/reworded.
+    return brief + unknown_section
