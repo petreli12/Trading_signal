@@ -333,6 +333,7 @@ def summarize(
     unknown_cashtags: dict[str, int] | None = None,
     recap_status: str = "present",
     posts: list[dict[str, Any]] | None = None,
+    nontrading_reason: str | None = None,
 ) -> str:
     """Generate the brief from the aggregated table.
 
@@ -350,6 +351,9 @@ def summarize(
         posts: Optional list of the run's normalized X posts. When given, an
             evidence section (per-author counts + real example posts) for the
             most-mentioned ticker is appended deterministically.
+        nontrading_reason: For recap_status='not_expected', why the market is
+            closed (e.g. 'the weekend (Sunday)' or 'a market holiday') so the
+            brief names it accurately instead of guessing.
 
     Returns:
         The formatted brief text (Markdown).
@@ -361,6 +365,22 @@ def summarize(
 
     unknown_section = _render_unknown_cashtags(unknown_cashtags)
     recap_note = _RECAP_NOTE.get(recap_status, "")
+    recap_guidance = _RECAP_GUIDANCE[recap_status]
+    if recap_status == "not_expected" and nontrading_reason:
+        recap_note = (
+            f"> _Non-trading day — {nontrading_reason}; no EOD recap expected. "
+            "Brief is X-only._\n\n"
+        )
+        recap_guidance = (
+            f"IMPORTANT: today is a non-trading day — specifically {nontrading_reason}. "
+            "NO EOD recap exists or is expected; this is entirely NORMAL — do NOT "
+            "label it critical or alarming, and do NOT open with a 'zero PDF "
+            f"corroboration' alarm. Refer to the day accurately as {nontrading_reason}; "
+            "do NOT call it a 'holiday' unless it actually is one. Because there is no "
+            "recap at all, pump_risk is true for every spiking ticker BY DEFINITION and "
+            "is NOT a meaningful pump signal — do not call these pumps. Present the X "
+            "narrative as the day's attention picture."
+        )
 
     prepared = _prepare(table)
     if not prepared:
@@ -372,7 +392,7 @@ def summarize(
 
     user_message = (
         f"{_MODE_GUIDANCE[mode]}\n\n"
-        f"{_RECAP_GUIDANCE[recap_status]}\n\n"
+        f"{recap_guidance}\n\n"
         "Buckets: 'x' = X List narrative/attention; 'pdf' = EOD recap "
         "(credible, actionable) — the pdf net_sentiment is the recap's own "
         "stated call. pump_risk=true means an X mention spike with no PDF "

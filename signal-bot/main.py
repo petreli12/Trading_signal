@@ -122,6 +122,15 @@ def _orchestrate(mode: str, run_date: date, run_id: int) -> None:
     recap_status = _recap_status(
         mode, run_date, pdf_present, datetime.now(MARKET_TZ)
     )
+    # When non-trading, name WHY (weekend vs. holiday) so the brief doesn't
+    # mislabel a Saturday/Sunday run as a "holiday".
+    nontrading_reason = None
+    if recap_status == "not_expected":
+        nontrading_reason = (
+            f"the weekend ({run_date:%A})"
+            if run_date.weekday() >= 5
+            else "a market holiday"
+        )
 
     rows = aggregate.build(run_date.isoformat(), run_id=run_id, pdf_date=pdf_date)
     unknown_cashtags = _tally_unknown_cashtags(new_posts)
@@ -131,6 +140,7 @@ def _orchestrate(mode: str, run_date: date, run_id: int) -> None:
         unknown_cashtags=unknown_cashtags,
         recap_status=recap_status,
         posts=new_posts,
+        nontrading_reason=nontrading_reason,
     )
     brief = _append_warnings(brief, warnings)
 
