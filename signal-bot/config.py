@@ -5,6 +5,7 @@ point of use (see each module). This file holds only non-secret tuning knobs.
 """
 
 import os
+from datetime import time as _time
 
 from dotenv import load_dotenv
 
@@ -33,8 +34,17 @@ SOURCE_WEIGHTS: dict[str, float] = {
 RUN_MODES = ("preopen", "postclose")
 SCHEDULE_UTC = {
     "preopen": "12:00",    # 08:00 ET (EDT)
-    "postclose": "21:00",  # 17:00 ET (EDT)
+    "postclose": "22:45",  # 18:45 ET (EDT) — late enough the recap is usually posted
 }
+
+# A trading-day EOD recap is expected to be POSTED by this ET wall-clock time.
+# Used only to word a post-close run's missing recap:
+#   - before this time -> 'pending'  (the recap may simply not be posted yet;
+#                                      calm, no alarm — e.g. a manual early run)
+#   - at/after          -> 'missing'  (overdue; likely an ingestion/email failure)
+# Aligned with the post-close cron (~18:45 ET): by the time that run fires the
+# recap is normally already in, so an absent recap then is genuinely notable.
+RECAP_EXPECTED_BY_ET = _time(18, 45)  # 6:45 PM ET
 
 # --- Prompt knobs --------------------------------------------------------
 # Tuning for the LLM summary step. The model name itself is read from the

@@ -3,8 +3,8 @@ name: signal-bot schedule
 on:
   schedule:
     # GitHub Actions cron is UTC. ET targets below assume EDT.
-    - cron: "0 12 * * 1-5"   # 08:00 ET pre-open
-    - cron: "0 21 * * 1-5"   # 17:00 ET post-close
+    - cron: "0 12 * * 1-5"    # 08:00 ET pre-open
+    - cron: "45 22 * * 1-5"   # 18:45 ET post-close (late enough the recap is usually posted)
   workflow_dispatch:
     inputs:
       mode:

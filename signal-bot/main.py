@@ -116,11 +116,12 @@ def _orchestrate(mode: str, run_date: date, run_id: int) -> None:
     pdf_present = recap_doc is not None
 
     # Classify the no-recap state so the brief words an EXPECTED absence calmly
-    # and only alarms on a NOTABLE one (reuses the NYSE gate + run mode; no new
-    # calendar). Simplification (per spec): post-close on a trading day with no
-    # recap row counts as 'missing' even if the group simply hasn't posted yet —
-    # the post-close cron is meant to fire well after the recap is available.
-    recap_status = _recap_status(mode, run_date, pdf_present)
+    # and only alarms on a NOTABLE one (reuses the NYSE gate + run mode + an ET
+    # cutoff; no new calendar). A post-close recap that hasn't posted yet (before
+    # the cutoff) is 'pending', not an alarm — recaps sometimes arrive late.
+    recap_status = _recap_status(
+        mode, run_date, pdf_present, datetime.now(MARKET_TZ)
+    )
 
     rows = aggregate.build(run_date.isoformat(), run_id=run_id, pdf_date=pdf_date)
     unknown_cashtags = _tally_unknown_cashtags(new_posts)
@@ -165,23 +166,34 @@ def _orchestrate(mode: str, run_date: date, run_id: int) -> None:
     logger.info("%s run complete (%s) — %s", mode, status, notes)
 
 
-def _recap_status(mode: str, run_date: date, pdf_present: bool) -> str:
+def _recap_status(
+    mode: str, run_date: date, pdf_present: bool, now: datetime
+) -> str:
     """Classify the EOD-recap availability for brief wording.
+
+    Args:
+        now: Current time in MARKET_TZ (ET) — used to tell a not-posted-yet
+            recap from a genuinely overdue one on a post-close run.
 
     Returns one of:
         'present'      — a recap was found/used.
         'not_expected' — non-trading day (weekend/holiday or --force off-session);
                          no recap exists or is expected.
-        'pending'      — trading day, recap not available yet (pre-open, or no
-                         prior recap on file); normal timing.
-        'missing'      — post-close on a trading day with no recap row; the recap
-                         should be there, so flag a possible ingestion failure.
+        'pending'      — trading day, recap not available yet but not overdue
+                         (pre-open, or post-close before RECAP_EXPECTED_BY_ET);
+                         normal timing, recaps sometimes post late.
+        'missing'      — post-close on a trading day, recap still absent at/after
+                         RECAP_EXPECTED_BY_ET; overdue, so flag a possible
+                         ingestion failure.
     """
     if pdf_present:
         return "present"
     if not _is_trading_day(run_date):
         return "not_expected"
     if mode == "preopen":
+        return "pending"
+    # post-close on a trading day: pending until the recap is overdue.
+    if now.time() < config.RECAP_EXPECTED_BY_ET:
         return "pending"
     return "missing"
 

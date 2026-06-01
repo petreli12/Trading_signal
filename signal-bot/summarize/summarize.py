@@ -83,8 +83,8 @@ _RECAP_GUIDANCE = {
 _RECAP_NOTE = {
     "not_expected": "> _Non-trading day — no EOD recap expected. Brief is X-only._\n\n",
     "pending": (
-        "> _Today's recap not yet posted — anchored on X only "
-        "(pre-open uses the prior session's recap)._\n\n"
+        "> _EOD recap not available yet — anchored on X only; "
+        "it may post later this session._\n\n"
     ),
     "missing": (
         "> ⚠️ **Today's EOD recap is missing on a trading day — likely an "
