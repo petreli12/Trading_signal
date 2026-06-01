@@ -235,6 +235,9 @@ _LEGEND = (
     "sharply split (a divided, riskier read).\n"
     "- **Confidence** — how trustworthy the read is; clear, repeated mentions score higher.\n"
     "- **Notes / Signal** — plain-English takeaway for that ticker.\n"
+    "- **Catalysts** — the likely reason behind the move (earnings, analyst upgrade, "
+    "news, product, macro, technical), inferred from the actual posts. "
+    "'Momentum/narrative' means no clear news driver — just attention.\n"
     "- **pump_risk** — a mention spike with no EOD-recap backing: treat as possible hype, "
     "not a confirmed move.\n"
     "- **X vs. recap** — *X* is trader chatter from the X List (attention/narrative); "
@@ -303,6 +306,42 @@ def _render_x_evidence(
             excerpt = excerpt[:237].rstrip() + "…"
         lines.append(f"- **@{author}** · {ts} · {eng} eng — \"{excerpt}\"\n")
     return "".join(lines)
+
+
+def _attach_sample_posts(
+    prepared: list[dict[str, Any]],
+    posts: list[dict[str, Any]] | None,
+    per_ticker: int = 2,
+    max_len: int = 160,
+) -> None:
+    """Attach a few representative post excerpts per ticker for catalyst grounding.
+
+    Mutates each entry, adding ``sample_posts`` (highest-engagement excerpts of
+    posts mentioning that ticker). These let the LLM infer WHY sentiment leans
+    the way it does from real text, instead of guessing a catalyst.
+    """
+    if not posts:
+        return
+    by_ticker: dict[str, list[dict[str, Any]]] = {}
+    for p in posts:
+        for tkr in extract.tickers(p.get("text", "") or ""):
+            by_ticker.setdefault(tkr, []).append(p)
+    for entry in prepared:
+        candidates = by_ticker.get(entry["ticker"])
+        if not candidates:
+            continue
+        top = sorted(
+            candidates,
+            key=lambda p: (int(p.get("engagement") or 0), p.get("ts", "")),
+            reverse=True,
+        )[:per_ticker]
+        samples = []
+        for p in top:
+            excerpt = " ".join((p.get("text", "") or "").split())
+            if len(excerpt) > max_len:
+                excerpt = excerpt[: max_len - 1].rstrip() + "…"
+            samples.append(excerpt)
+        entry["sample_posts"] = samples
 
 
 def _render_unknown_cashtags(counts: dict[str, int] | None) -> str:
@@ -389,6 +428,7 @@ def summarize(
             + f"# {mode.title()} Brief\n\nNo meaningful ticker signal in this run."
             + unknown_section
         )
+    _attach_sample_posts(prepared, posts)
 
     user_message = (
         f"{_MODE_GUIDANCE[mode]}\n\n"
@@ -400,18 +440,29 @@ def summarize(
         "ticker — surface it even if its rank is modest. If a pdf bucket has "
         "stance_divergence=true, explicitly note it using divergence_note "
         "(the recap's headline label disagrees with the tone of its own "
-        "notes).\n\n"
+        "notes). 'sample_posts' are representative post excerpts for that ticker "
+        "— use them ONLY to infer the catalyst; do NOT count them as extra "
+        "mentions.\n\n"
         "Write the brief in Markdown. Structure it as:\n"
         "1. A one-line headline takeaway.\n"
         "2. 'Top movers' — render as a Markdown table with EXACTLY these columns "
         "in this order: Ticker | Mentions | Δ | Net sentiment | Dispersion | "
         "Confidence | Notes. One row per ticker; put the X-vs-recap split and any "
         "caveats in Notes.\n"
-        "3. 'Watch / risk' — any pump_risk flags and sharply divided "
+        "3. 'Catalysts' — for each ticker in the table, ONE line on WHY sentiment "
+        "leans as it does, inferred ONLY from that ticker's sample_posts. Classify "
+        "the driver as one of: earnings, guidance, analyst rating change, "
+        "M&A/partnership, product/launch, regulatory/legal, macro/Fed, "
+        "technical/levels, or none. Format: '**TICKER** — <driver>: \"<short quote "
+        "from a sample post>\"'. If sample_posts show no clear driver, write "
+        "'**TICKER** — No clear catalyst (momentum/narrative).' NEVER invent a "
+        "catalyst, quote, or event that is not present in sample_posts.\n"
+        "4. 'Watch / risk' — any pump_risk flags and sharply divided "
         "(high-dispersion) names.\n"
         "Do NOT add your own glossary or column key — one is appended "
-        "automatically after your brief. Do NOT quote or invent individual "
-        "posts/usernames — real example posts are appended automatically.\n\n"
+        "automatically after your brief. Do NOT add a separate example-posts list "
+        "or invent usernames; you MAY quote a short phrase from sample_posts as "
+        "catalyst evidence.\n\n"
         "Data (ranked, JSON):\n"
         f"{json.dumps(prepared, ensure_ascii=False)}"
     )
