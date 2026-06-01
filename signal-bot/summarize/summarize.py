@@ -44,6 +44,55 @@ _MODE_GUIDANCE = {
     ),
 }
 
+# How the LLM should treat the recap (PDF) bucket's availability. This controls
+# TONE so an EXPECTED absence (weekend / not-yet-posted) is not described as a
+# crisis, while a genuinely missing recap on a trading day stays flagged.
+_RECAP_GUIDANCE = {
+    "present": (
+        "An EOD recap IS available (the 'pdf' bucket) — use it as the credible "
+        "anchor against the X narrative."
+    ),
+    "not_expected": (
+        "IMPORTANT: today is a NON-TRADING DAY, so NO EOD recap exists or is "
+        "expected. The lack of recap/PDF corroboration is entirely NORMAL — do "
+        "NOT label it critical, alarming, or a problem, and do NOT open with a "
+        "'zero PDF corroboration' alarm. Because there is no recap at all, "
+        "pump_risk is true for every spiking ticker BY DEFINITION and is NOT a "
+        "meaningful pump signal here — do not call these pumps. Present the X "
+        "narrative as the day's attention picture."
+    ),
+    "pending": (
+        "IMPORTANT: today's EOD recap has not been posted yet (normal timing). "
+        "Treat the missing recap as EXPECTED and routine — do NOT raise it as "
+        "critical. Because no recap is available this run, pump_risk is true for "
+        "every spiking ticker BY DEFINITION and is NOT a meaningful pump signal "
+        "— do not call these pumps. Anchor on the X narrative and note calmly "
+        "that recap corroboration is pending."
+    ),
+    "missing": (
+        "WARNING: today's EOD recap SHOULD be available but is absent — this may "
+        "be an ingestion/email failure. Flag that recap corroboration is missing "
+        "as a data-pipeline caveat. Note that with no recap, pump_risk is true "
+        "for every spiking ticker by definition, so treat those flags with that "
+        "caveat rather than as confirmed pumps."
+    ),
+}
+
+# Deterministic, top-of-brief note for each non-present recap state (so the
+# wording can't be dropped or softened by the model). 'present' adds nothing.
+_RECAP_NOTE = {
+    "not_expected": "> _Non-trading day — no EOD recap expected. Brief is X-only._\n\n",
+    "pending": (
+        "> _Today's recap not yet posted — anchored on X only "
+        "(pre-open uses the prior session's recap)._\n\n"
+    ),
+    "missing": (
+        "> ⚠️ **Today's EOD recap is missing on a trading day — likely an "
+        "ingestion/email failure. Below is X-only; verify the recap email "
+        "pipeline.**\n\n"
+    ),
+}
+
 _SYSTEM_PROMPT = (
     "You are a buy-side analyst writing a tight daily trading brief for one "
     "experienced trader. Be concise, concrete, and skeptical.\n\n"
@@ -192,6 +241,7 @@ def summarize(
     mode: str,
     table: list[dict[str, Any]],
     unknown_cashtags: dict[str, int] | None = None,
+    recap_status: str = "present",
 ) -> str:
     """Generate the brief from the aggregated table.
 
@@ -201,24 +251,34 @@ def summarize(
         unknown_cashtags: Optional {symbol: run mention count} of regex-valid
             but non-whitelisted cashtags. Frequent ones are surfaced in a
             trailing informational section (never scored).
+        recap_status: How to describe the EOD-recap (PDF) bucket's absence:
+            'present'      — a recap was used (no note).
+            'not_expected' — non-trading day; absence is normal (calm note).
+            'pending'      — trading day, recap not posted yet (informational).
+            'missing'      — trading day, recap genuinely absent (prominent warning).
 
     Returns:
         The formatted brief text (Markdown).
     """
     if mode not in _MODE_GUIDANCE:
         raise ValueError(f"Unknown mode {mode!r}; expected 'preopen' or 'postclose'.")
+    if recap_status not in _RECAP_GUIDANCE:
+        raise ValueError(f"Unknown recap_status {recap_status!r}.")
 
     unknown_section = _render_unknown_cashtags(unknown_cashtags)
+    recap_note = _RECAP_NOTE.get(recap_status, "")
 
     prepared = _prepare(table)
     if not prepared:
         return (
-            f"# {mode.title()} Brief\n\nNo meaningful ticker signal in this run."
+            recap_note
+            + f"# {mode.title()} Brief\n\nNo meaningful ticker signal in this run."
             + unknown_section
         )
 
     user_message = (
         f"{_MODE_GUIDANCE[mode]}\n\n"
+        f"{_RECAP_GUIDANCE[recap_status]}\n\n"
         "Buckets: 'x' = X List narrative/attention; 'pdf' = EOD recap "
         "(credible, actionable) — the pdf net_sentiment is the recap's own "
         "stated call. pump_risk=true means an X mention spike with no PDF "
@@ -247,5 +307,6 @@ def summarize(
     brief = "".join(
         block.text for block in message.content if getattr(block, "type", "") == "text"
     ).strip()
-    # Append deterministically (not via the LLM) so it can't be dropped/reworded.
-    return brief + unknown_section
+    # Prepend the recap note and append unknowns deterministically (not via the
+    # LLM) so neither can be dropped or reworded.
+    return recap_note + brief + unknown_section

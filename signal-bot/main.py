@@ -114,20 +114,24 @@ def _orchestrate(mode: str, run_date: date, run_id: int) -> None:
 
     pdf_date = recap_doc["doc_date"] if recap_doc else None
     pdf_present = recap_doc is not None
-    if not pdf_present:
-        reason = (
-            "today's recap not posted yet"
-            if mode == "postclose"
-            else "no prior recap on file"
-        )
-        warnings.append(f"Recap not yet available ({reason}) — brief is X-only.")
+
+    # Classify the no-recap state so the brief words an EXPECTED absence calmly
+    # and only alarms on a NOTABLE one (reuses the NYSE gate + run mode; no new
+    # calendar). Simplification (per spec): post-close on a trading day with no
+    # recap row counts as 'missing' even if the group simply hasn't posted yet —
+    # the post-close cron is meant to fire well after the recap is available.
+    recap_status = _recap_status(mode, run_date, pdf_present)
 
     rows = aggregate.build(run_date.isoformat(), run_id=run_id, pdf_date=pdf_date)
     unknown_cashtags = _tally_unknown_cashtags(new_posts)
-    brief = summarize.summarize(mode, rows, unknown_cashtags=unknown_cashtags)
+    brief = summarize.summarize(
+        mode, rows, unknown_cashtags=unknown_cashtags, recap_status=recap_status
+    )
     brief = _append_warnings(brief, warnings)
 
-    status = "partial" if warnings else "ok"
+    # A genuinely-missing recap on a trading day is a degraded run; expected
+    # absences (weekend / not-yet-posted) are not.
+    status = "partial" if warnings or recap_status == "missing" else "ok"
 
     # A run that ingested nothing usable from either bucket is a red flag
     # (e.g. provider returned empty on depleted credits). Keyed off ACTUAL
@@ -153,11 +157,33 @@ def _orchestrate(mode: str, run_date: date, run_id: int) -> None:
             logger.warning("SMS digest failed (suppressed): %r", exc)
 
     notes = (
-        f"{len(new_posts)} new posts, {len(rows)} ticker rows, pdf_date={pdf_date}"
+        f"{len(new_posts)} new posts, {len(rows)} ticker rows, "
+        f"pdf_date={pdf_date}, recap={recap_status}"
         + (f"; warnings: {' | '.join(warnings)}" if warnings else "")
     )
     db.finish_run(run_id, status, notes)
     logger.info("%s run complete (%s) — %s", mode, status, notes)
+
+
+def _recap_status(mode: str, run_date: date, pdf_present: bool) -> str:
+    """Classify the EOD-recap availability for brief wording.
+
+    Returns one of:
+        'present'      — a recap was found/used.
+        'not_expected' — non-trading day (weekend/holiday or --force off-session);
+                         no recap exists or is expected.
+        'pending'      — trading day, recap not available yet (pre-open, or no
+                         prior recap on file); normal timing.
+        'missing'      — post-close on a trading day with no recap row; the recap
+                         should be there, so flag a possible ingestion failure.
+    """
+    if pdf_present:
+        return "present"
+    if not _is_trading_day(run_date):
+        return "not_expected"
+    if mode == "preopen":
+        return "pending"
+    return "missing"
 
 
 def _tally_unknown_cashtags(posts: list) -> dict[str, int]:
