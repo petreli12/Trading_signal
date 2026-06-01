@@ -24,11 +24,25 @@ on:
         default: false
         type: boolean
 
+# The bot's SQLite DB is committed back to the repo after each run (see the
+# "Persist database" step), so it needs write access to contents.
+permissions:
+  contents: write
+
+# Serialize runs so two overlapping runs (e.g. a manual double-trigger) never
+# race to push the database. Don't cancel an in-flight brief.
+concurrency:
+  group: signal-bot-run
+  cancel-in-progress: false
+
 jobs:
   run:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          # Full history so the post-run rebase/push of the DB is reliable.
+          fetch-depth: 0
 
       - uses: actions/setup-python@v6
         with:
@@ -76,3 +90,23 @@ jobs:
           fi
           echo "Running: python main.py $ARGS"
           python main.py $ARGS
+
+      # Persist the SQLite DB across runs so the bot has memory between runs:
+      # the incremental-fetch watermark (latest post id) and the day-over-day
+      # mention/sentiment history that the Δ column is computed from. Without
+      # this, every run starts empty and Δ always equals the raw count.
+      - name: Persist database
+        if: always()
+        run: |
+          DB="signal-bot/signal_bot.db"
+          if [ -z "$(git status --porcelain -- "$DB")" ]; then
+            echo "No DB changes to persist."
+            exit 0
+          fi
+          git add "$DB"
+          git -c user.name="signal-bot" \
+              -c user.email="signal-bot@users.noreply.github.com" \
+              commit -m "chore(data): update signal_bot.db [skip ci]"
+          # Integrate anything that landed on the branch during the run, then push.
+          git pull --rebase --autostash origin "$GITHUB_REF_NAME"
+          git push origin "HEAD:$GITHUB_REF_NAME"

@@ -259,6 +259,35 @@ def _fmt_ts(ts: str) -> str:
         return ts or "?"
 
 
+def _is_retweet(text: str) -> bool:
+    """True if the post is a retweet (its timestamp reflects the ORIGINAL post)."""
+    return (text or "").lstrip().startswith("RT @")
+
+
+def _render_window(posts: list[dict[str, Any]] | None) -> str:
+    """One-line, deterministic note on the actual X posts analyzed this run.
+
+    Makes the data window explicit (count + time span) so a reader isn't
+    surprised that examples can be a day or two old: the X List timeline is
+    fetched newest-first up to a page cap, NOT bucketed by calendar day, and
+    examples are ranked by engagement (which accrues over time).
+    """
+    if not posts:
+        return ""
+    n = len(posts)
+    plural = "s" if n != 1 else ""
+    ts_vals = sorted(t for t in (p.get("ts", "") for p in posts) if t)
+    if not ts_vals:
+        return f"> _X window: {n} post{plural} analyzed this run._\n\n"
+    lo, hi = _fmt_ts(ts_vals[0]), _fmt_ts(ts_vals[-1])
+    span = lo if lo == hi else f"{lo} – {hi}"
+    return (
+        f"> _X window: {n} post{plural} analyzed this run, posted {span}. "
+        "Examples are ranked by engagement, so the most-liked (often a bit "
+        "older, including retweets) appear first._\n\n"
+    )
+
+
 def _render_x_evidence(
     ticker: str | None,
     posts: list[dict[str, Any]] | None,
@@ -295,16 +324,22 @@ def _render_x_evidence(
     lines = [
         f"\n\n---\n\n## What X is saying about ${ticker} (most-mentioned)\n",
         f"**Who's posting this run:** {who}\n",
-        "\n**Sample posts:**\n",
+        "\n**Sample posts** (highest-engagement first):\n",
     ]
     for p in examples:
         author = (p.get("author") or "?").lstrip("@")
+        text = p.get("text", "") or ""
+        rt = " · RT" if _is_retweet(text) else ""
         ts = _fmt_ts(p.get("ts", ""))
         eng = _fmt_engagement(int(p.get("engagement") or 0))
-        excerpt = " ".join((p.get("text", "") or "").split())
+        excerpt = " ".join(text.split())
         if len(excerpt) > 240:
             excerpt = excerpt[:237].rstrip() + "…"
-        lines.append(f"- **@{author}** · {ts} · {eng} eng — \"{excerpt}\"\n")
+        lines.append(f"- **@{author}**{rt} · {ts} · {eng} eng — \"{excerpt}\"\n")
+    lines.append(
+        "\n_Ordered by engagement, not time. **RT** = retweet — its timestamp is "
+        "the original post's, so it can predate this run._\n"
+    )
     return "".join(lines)
 
 
@@ -421,10 +456,13 @@ def summarize(
             "narrative as the day's attention picture."
         )
 
+    window_note = _render_window(posts)
+
     prepared = _prepare(table)
     if not prepared:
         return (
             recap_note
+            + window_note
             + f"# {mode.title()} Brief\n\nNo meaningful ticker signal in this run."
             + unknown_section
         )
@@ -486,6 +524,7 @@ def summarize(
     )
     evidence = _render_x_evidence(top_x["ticker"] if top_x else None, posts)
 
-    # Prepend the recap note and append the X evidence + unknowns + column legend
-    # deterministically (not via the LLM) so none can be dropped or reworded.
-    return recap_note + brief + evidence + unknown_section + _LEGEND
+    # Prepend the recap + window notes and append the X evidence + unknowns +
+    # column legend deterministically (not via the LLM) so none can be dropped
+    # or reworded.
+    return recap_note + window_note + brief + evidence + unknown_section + _LEGEND

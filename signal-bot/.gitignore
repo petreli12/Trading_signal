@@ -3,4 +3,10 @@ __pycache__/
 *.pyc
 .env
 *.db
+# Persist the production DB across CI runs (see schedule.yml "Persist database").
+# This is the bot's memory: incremental fetch watermark + day-over-day deltas.
+!signal_bot.db
+# ...but never the transient SQLite WAL/SHM sidecars.
+signal_bot.db-wal
+signal_bot.db-shm
 data/

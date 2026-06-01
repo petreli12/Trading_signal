@@ -9,3 +9,7 @@ __pycache__/
 # Local secrets & state (also covered by signal-bot/.gitignore)
 .env
 *.db
+# Persist the production DB across CI runs (bot memory: deltas + fetch watermark).
+!signal-bot/signal_bot.db
+signal-bot/signal_bot.db-wal
+signal-bot/signal_bot.db-shm

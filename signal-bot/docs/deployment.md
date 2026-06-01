@@ -170,3 +170,36 @@ For **each** job:
   code or secrets. Rotate it if exposed.
 - You can still trigger runs manually any time from **Actions → "signal-bot
   schedule" → Run workflow**, which is handy for ad-hoc tests.
+
+## 6. State / database persistence
+
+The bot keeps memory **between runs** in a small SQLite file
+(`signal-bot/signal_bot.db`) that is **committed back to the repo** at the end
+of every run (the **"Persist database"** workflow step). This file is the bot's
+memory:
+
+- the **incremental-fetch watermark** (the latest X post id seen), so each run
+  only pulls genuinely new posts, and
+- the **day-over-day history** (`ticker_daily`) that the **Δ** column compares
+  against (the most recent prior trading day with data).
+
+Without persistence the runner starts empty each time, so the watermark and all
+deltas reset — Δ would always equal the raw mention count. Notes:
+
+- The workflow needs `permissions: contents: write` (set at the top of
+  `schedule.yml`) and checks out full history (`fetch-depth: 0`) so the
+  post-run rebase/push is reliable. A `concurrency` group serializes runs so two
+  overlapping triggers never race to push the DB.
+- Commits are made as `signal-bot <signal-bot@users.noreply.github.com>` with a
+  `chore(data): update signal_bot.db [skip ci]` message. Pushing to `main` does
+  **not** trigger the workflow (it only runs on `workflow_dispatch`), so there is
+  no loop.
+- `signal_bot.db` is force-un-ignored in `.gitignore` (the `*.db` rule is
+  overridden by `!signal_bot.db`); the transient `-wal`/`-shm` sidecars stay
+  ignored.
+- **Deltas become meaningful from the next trading day onward** — the first run
+  after enabling this has no prior day to compare against, so its Δ still equals
+  the raw count.
+- This commits a binary that grows over time. It's fine for a long while; if the
+  repo ever gets heavy, prune old `posts`/`ticker_daily` rows or periodically
+  squash the data commits.
