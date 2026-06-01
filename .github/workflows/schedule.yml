@@ -68,10 +68,10 @@ jobs:
           # Optional failure-alert overrides (fall back to defaults / EMAIL_TO).
           ALERT_ON_FAILURE: ${{ secrets.ALERT_ON_FAILURE }}
           ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
-          # Optional SMS digest via carrier email-to-SMS gateway (blank = off).
-          SMS_PHONE: ${{ secrets.SMS_PHONE }}
-          SMS_CARRIER: ${{ secrets.SMS_CARRIER }}
-          SMS_TO: ${{ secrets.SMS_TO }}
+          # SMS digest is disabled: Metro/T-Mobile blocks carrier email-to-SMS
+          # gateways, so texts never reach the handset. Email is the only channel.
+          # To re-enable, wire a real SMS provider (e.g. Twilio) in deliver/email_send.py
+          # and restore SMS_* env here.
         run: |
           ARGS="--mode ${{ steps.mode.outputs.mode }}"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.force }}" = "true" ]; then
