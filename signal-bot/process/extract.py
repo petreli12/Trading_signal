@@ -20,9 +20,13 @@ _CASHTAG_RE = re.compile(r"\$([A-Za-z]{1,5})(?:\.([A-Za-z]))?\b")
 # Common cashtag false positives (short English words people prefix with $).
 _CASHTAG_STOPWORDS = {"A", "I", "ALL", "FOR", "ON", "IT", "BE", "OR", "SO"}
 
-# Minimal company/index alias table -> canonical symbol. Extend as needed;
-# kept small and explicit since name->ticker needs a curated lookup.
+# Company/index alias table -> canonical symbol. name->ticker needs a curated
+# lookup, so this is explicit. Keys are matched case-insensitively on word
+# boundaries. NOTE: without spaCy installed, these match on raw text, so a
+# generic word ("apple") can false-positive on non-stock uses ("Apple watch").
+# Cashtags ($AAPL) remain the high-precision signal; aliases add recall.
 COMPANY_ALIASES: dict[str, str] = {
+    # Mega-cap tech
     "apple": "AAPL",
     "microsoft": "MSFT",
     "nvidia": "NVDA",
@@ -33,17 +37,63 @@ COMPANY_ALIASES: dict[str, str] = {
     "facebook": "META",
     "tesla": "TSLA",
     "broadcom": "AVGO",
+    "netflix": "NFLX",
+    # Semis & hardware
     "arm": "ARM",
     "ibm": "IBM",
-    "netflix": "NFLX",
     "amd": "AMD",
     "intel": "INTC",
+    "micron": "MU",
+    "qualcomm": "QCOM",
+    "marvell": "MRVL",
+    "supermicro": "SMCI",
+    "super micro": "SMCI",
+    "taiwan semi": "TSM",
+    "tsmc": "TSM",
+    "asml": "ASML",
+    # Software / cloud / security
     "palantir": "PLTR",
+    "oracle": "ORCL",
+    "salesforce": "CRM",
+    "adobe": "ADBE",
+    "servicenow": "NOW",
+    "snowflake": "SNOW",
+    "crowdstrike": "CRWD",
+    "cloudflare": "NET",
+    "datadog": "DDOG",
+    "palo alto": "PANW",
+    "shopify": "SHOP",
+    # Consumer / internet / fintech
+    "uber": "UBER",
+    "airbnb": "ABNB",
+    "coinbase": "COIN",
+    "robinhood": "HOOD",
+    "paypal": "PYPL",
+    "microstrategy": "MSTR",
+    "strategy inc": "MSTR",
+    "alibaba": "BABA",
+    "disney": "DIS",
+    "walmart": "WMT",
+    "costco": "COST",
+    # Autos & industrials
+    "boeing": "BA",
+    # Financials
+    "jpmorgan": "JPM",
+    "jp morgan": "JPM",
+    "goldman sachs": "GS",
+    "bank of america": "BAC",
+    # Healthcare / energy
+    "eli lilly": "LLY",
+    "exxon": "XOM",
+    "chevron": "CVX",
+    # Indices / ETFs
     "the nasdaq": "QQQ",
     "nasdaq": "QQQ",
     "the s&p": "SPY",
     "s&p 500": "SPY",
     "sp500": "SPY",
+    "russell 2000": "IWM",
+    "the dow": "DIA",
 }
 
 # Precompiled, longest-alias-first so multi-word names win over substrings.

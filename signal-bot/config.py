@@ -11,15 +11,20 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- Watchlist -----------------------------------------------------------
-# Optional explicit universe of tickers to track. Empty means "track whatever
-# is mentioned" and let aggregation rank by mention volume.
-WATCHLIST: list[str] = []
+# Tickers you actively follow. Aggregation still ranks the full mentioned
+# universe; the watchlist is surfaced to the summary so these names are called
+# out even if their raw rank is lower. Empty list = no special treatment.
+WATCHLIST: list[str] = [
+    "NVDA", "MSFT", "AAPL", "AMZN", "GOOGL", "META", "TSLA", "AVGO",
+    "AMD", "ARM", "PLTR", "QQQ", "SPY", "SMCI", "MU", "COIN", "HOOD",
+]
 
 # --- Source weighting ----------------------------------------------------
 # Buckets keep X (narrative) and PDF (recap) signal separate. Per-source
-# weights feed the weighted_score in process/aggregate.py.
+# weights feed the weighted_score in process/aggregate.py. The recap PDF is a
+# higher-credibility, curated source, so it outweighs raw X chatter.
 SOURCE_WEIGHTS: dict[str, float] = {
-    "x": 1.0,     # X List narrative
+    "x": 1.0,     # X List narrative / attention
     "pdf": 1.5,   # EOD recap PDF (higher-credibility source)
 }
 

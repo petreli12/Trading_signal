@@ -101,6 +101,7 @@ def _prepare(table: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "confidence": round(row["confidence"], 2),
         }
 
+    watchlist = {t.upper() for t in config.WATCHLIST}
     prepared: list[dict[str, Any]] = []
     for ticker in order:
         entry = by_ticker[ticker]
@@ -108,6 +109,7 @@ def _prepare(table: list[dict[str, Any]]) -> list[dict[str, Any]]:
         has_pdf = entry["pdf"] is not None
         x_spike = bool(x and x["mention_delta"] >= PUMP_MIN_DELTA)
         entry["pump_risk"] = x_spike and not has_pdf
+        entry["watchlist"] = ticker.upper() in watchlist
         prepared.append(entry)
 
     max_tickers = config.PROMPT.get("max_tickers", 15)
@@ -135,7 +137,8 @@ def summarize(mode: str, table: list[dict[str, Any]]) -> str:
         f"{_MODE_GUIDANCE[mode]}\n\n"
         "Buckets: 'x' = X List narrative/attention; 'pdf' = EOD recap "
         "(credible, actionable). pump_risk=true means an X mention spike with "
-        "no PDF corroboration.\n\n"
+        "no PDF corroboration. watchlist=true means the reader actively follows "
+        "this ticker — surface it even if its rank is modest.\n\n"
         "Write the brief in Markdown. Structure it as:\n"
         "1. A one-line headline takeaway.\n"
         "2. 'Top movers' — ranked tickers with mentions, day-over-day delta, "
