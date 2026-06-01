@@ -156,6 +156,29 @@ def get_pdf_doc_by_date(
         return dict(row) if row else None
 
 
+def get_latest_pdf_doc(
+    on_or_before: str | None = None, db_path: str = DEFAULT_DB_PATH
+) -> dict[str, Any] | None:
+    """Return the most recent recap available, optionally on/before a date.
+
+    Used by the pre-open run: today's recap does not exist yet, so it must
+    fall back to the most recently available recap (the prior trading day's).
+    """
+    with connection(db_path) as conn:
+        if on_or_before is None:
+            row = conn.execute(
+                "SELECT id, doc_date, source, raw_text, fetched_at FROM pdf_docs "
+                "ORDER BY doc_date DESC, id DESC LIMIT 1"
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT id, doc_date, source, raw_text, fetched_at FROM pdf_docs "
+                "WHERE doc_date <= ? ORDER BY doc_date DESC, id DESC LIMIT 1",
+                (on_or_before,),
+            ).fetchone()
+        return dict(row) if row else None
+
+
 # --- ticker_daily helpers ------------------------------------------------
 
 def upsert_ticker_daily(row: dict[str, Any], db_path: str = DEFAULT_DB_PATH) -> None:

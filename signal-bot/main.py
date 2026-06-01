@@ -10,7 +10,7 @@ prior trading day's recap PDF; post-close ingests today's recap.
 import argparse
 import logging
 import traceback
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 import pandas_market_calendars as mcal
@@ -36,14 +36,6 @@ _DATA_BANNER = (
 def _is_trading_day(day: date) -> bool:
     valid = _NYSE.valid_days(start_date=day.isoformat(), end_date=day.isoformat())
     return len(valid) > 0
-
-
-def _prev_trading_day(day: date) -> date | None:
-    window_start = (day - timedelta(days=10)).isoformat()
-    valid = _NYSE.valid_days(
-        start_date=window_start, end_date=(day - timedelta(days=1)).isoformat()
-    )
-    return valid[-1].date() if len(valid) else None
 
 
 def parse_args() -> argparse.Namespace:
@@ -104,20 +96,31 @@ def _orchestrate(mode: str, run_date: date, run_id: int) -> None:
     except Exception as exc:
         warnings.append(f"X ingestion failed: {exc!r}")
 
-    # PDF ingestion.
+    # PDF ingestion + recap-date selection.
+    #   post-close: today's recap (run_date == recap_date). Posted at/after EOD,
+    #               so a cron firing early can legitimately find it absent.
+    #   pre-open:   today's recap does not exist yet — use the MOST RECENT
+    #               available recap (the prior trading day's).
     if mode == "postclose":
         try:
             doc = pdf_email.fetch()
             if doc:
                 db.insert_pdf_doc(doc)
-            else:
-                warnings.append("No EOD PDF found in inbox.")
         except Exception as exc:
             warnings.append(f"PDF ingestion failed: {exc!r}")
-        pdf_date = run_date.isoformat()
-    else:  # preopen reuses the prior trading day's recap
-        prev = _prev_trading_day(run_date)
-        pdf_date = (prev or run_date).isoformat()
+        recap_doc = db.get_pdf_doc_by_date(run_date.isoformat())
+    else:  # preopen
+        recap_doc = db.get_latest_pdf_doc(on_or_before=run_date.isoformat())
+
+    pdf_date = recap_doc["doc_date"] if recap_doc else None
+    pdf_present = recap_doc is not None
+    if not pdf_present:
+        reason = (
+            "today's recap not posted yet"
+            if mode == "postclose"
+            else "no prior recap on file"
+        )
+        warnings.append(f"Recap not yet available ({reason}) — brief is X-only.")
 
     rows = aggregate.build(run_date.isoformat(), run_id=run_id, pdf_date=pdf_date)
     brief = summarize.summarize(mode, rows)
@@ -127,7 +130,6 @@ def _orchestrate(mode: str, run_date: date, run_id: int) -> None:
 
     # A healthy run that ingested nothing from either bucket is still a red
     # flag (e.g. provider returned empty on depleted credits). Make it loud.
-    pdf_present = db.get_pdf_doc_by_date(pdf_date) is not None
     if status == "ok" and not new_posts and not pdf_present:
         logger.warning(
             "No data ingested this run (0 posts, no matching PDF) — "

@@ -93,13 +93,17 @@ def _prepare(table: list[dict[str, Any]]) -> list[dict[str, Any]]:
             by_ticker[ticker] = {"ticker": ticker, "x": None, "pdf": None}
             order.append(ticker)
         bucket = row["bucket"]
-        by_ticker[ticker][bucket] = {
+        cell = {
             "mentions": row["mention_count"],
             "mention_delta": row["mention_delta"],
             "net_sentiment": round(row["net_sentiment"], 2),
             "dispersion": round(row["dispersion"], 2),
             "confidence": round(row["confidence"], 2),
         }
+        if row.get("stance_divergence"):
+            cell["stance_divergence"] = True
+            cell["divergence_note"] = row.get("divergence_note", "")
+        by_ticker[ticker][bucket] = cell
 
     watchlist = {t.upper() for t in config.WATCHLIST}
     prepared: list[dict[str, Any]] = []
@@ -136,9 +140,13 @@ def summarize(mode: str, table: list[dict[str, Any]]) -> str:
     user_message = (
         f"{_MODE_GUIDANCE[mode]}\n\n"
         "Buckets: 'x' = X List narrative/attention; 'pdf' = EOD recap "
-        "(credible, actionable). pump_risk=true means an X mention spike with "
-        "no PDF corroboration. watchlist=true means the reader actively follows "
-        "this ticker — surface it even if its rank is modest.\n\n"
+        "(credible, actionable) — the pdf net_sentiment is the recap's own "
+        "stated call. pump_risk=true means an X mention spike with no PDF "
+        "corroboration. watchlist=true means the reader actively follows this "
+        "ticker — surface it even if its rank is modest. If a pdf bucket has "
+        "stance_divergence=true, explicitly note it using divergence_note "
+        "(the recap's headline label disagrees with the tone of its own "
+        "notes).\n\n"
         "Write the brief in Markdown. Structure it as:\n"
         "1. A one-line headline takeaway.\n"
         "2. 'Top movers' — ranked tickers with mentions, day-over-day delta, "
