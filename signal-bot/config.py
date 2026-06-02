@@ -30,11 +30,12 @@ SOURCE_WEIGHTS: dict[str, float] = {
 }
 
 # --- Schedule ------------------------------------------------------------
-# GitHub Actions cron is UTC. ET targets documented for reference only.
+# Reference only: runs are triggered by the external scheduler (cron-job.org)
+# in ET, not by these values. Kept for documentation; UTC shown for EDT.
 RUN_MODES = ("preopen", "postclose")
 SCHEDULE_UTC = {
     "preopen": "12:00",    # 08:00 ET (EDT)
-    "postclose": "00:00",  # 20:00 ET (EDT) — fires 00:00 UTC NEXT day (Tue–Sat)
+    "postclose": "03:00",  # 23:00 ET (EDT) — fires 03:00 UTC NEXT day
 }
 
 # A trading-day EOD recap is expected to be POSTED by this ET wall-clock time.
@@ -42,9 +43,10 @@ SCHEDULE_UTC = {
 #   - before this time -> 'pending'  (the recap may simply not be posted yet;
 #                                      calm, no alarm — e.g. a manual early run)
 #   - at/after          -> 'missing'  (overdue; likely an ingestion/email failure)
-# Set just before the 20:00 ET post-close cron: by 8 PM the recap is reliably
-# in, so an absent recap on that run is genuinely notable (likely a failure).
-RECAP_EXPECTED_BY_ET = _time(19, 45)  # 7:45 PM ET
+# The recap typically posts 9:00–10:45 PM ET, so the post-close run is at 11 PM
+# ET. By 10:45 PM the recap is reliably in, so an absent recap on the 11 PM run
+# is genuinely notable (likely a failure).
+RECAP_EXPECTED_BY_ET = _time(22, 45)  # 10:45 PM ET
 
 # --- Prompt knobs --------------------------------------------------------
 # Tuning for the LLM summary step. The model name itself is read from the

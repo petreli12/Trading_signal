@@ -26,7 +26,10 @@ from store import db
 
 BASE_URL = "https://api.twitterapi.io"
 LIST_TIMELINE_PATH = "/twitter/list/tweets_timeline"
-DEFAULT_MAX_PAGES = 3
+# Safety cap on pages fetched per run (~20 tweets/page). Pagination stops early
+# at the since_id watermark, so on a normal run only the genuinely-new posts are
+# pulled; this cap just bounds a first run / a busy session / a long gap.
+DEFAULT_MAX_PAGES = 10
 DEFAULT_TIMEOUT = 30
 # Retry/backoff for transient provider errors (rate limits, 5xx).
 MAX_RETRIES = 4

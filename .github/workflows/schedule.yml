@@ -6,7 +6,7 @@ on:
   # is now driven by an external scheduler (cron-job.org) that calls this
   # workflow via the workflow_dispatch REST API at the exact ET times:
   #   - pre-open:   08:00 America/New_York, Mon–Fri  (inputs.mode=preopen)
-  #   - post-close: 20:00 America/New_York, Mon–Fri  (inputs.mode=postclose)
+  #   - post-close: 23:00 America/New_York, Mon–Fri  (inputs.mode=postclose)
   # The NYSE trading-day gate in main.py still no-ops on holidays.
   workflow_dispatch:
     inputs:

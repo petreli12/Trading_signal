@@ -154,7 +154,8 @@ For **each** job:
 - **Schedule / timezone:** set the job timezone to **`America/New_York`**
   (cron-job.org handles DST automatically — no UTC math), then:
   - pre-open job:   **08:00**, Mon–Fri
-  - post-close job: **20:00**, Mon–Fri
+  - post-close job: **23:00**, Mon–Fri (the EOD recap typically posts
+    9:00–10:45 PM ET, so 11 PM lets it land first)
 
 > A successful dispatch returns **HTTP 204** with an empty body. cron-job.org
 > will show the job as succeeding on a 204. If you get **401/403**, the token
